@@ -1,9 +1,9 @@
+# Copyright (c) 2023 davix3f
 # Copyright (c) 2023 TheJMaster28
 # Copyright (c) 2023 Molodos
 # Copyright (c) 2023 sigathi
 # Copyright (c) 2020 DhanOS
 # The ElegooNeptuneThumbnailPrusa plugin is released under the terms of the AGPLv3 or higher.
-
 
 import argparse
 import base64
@@ -36,6 +36,11 @@ class Neptune_Thumbnail:
     thumbnail = ""
     time_to_print = ""
     filament_used = ""
+    machine_cost = ""
+    material_cost = ""
+    full_cost = ""
+    print_cost = ""
+    print_total_hours = None
 
     def __init__(self, slicer_output, old_printer=False, img_size="200x200", short_time_format=False, debug=False):
         self.slicer_output = slicer_output
@@ -89,9 +94,14 @@ class Neptune_Thumbnail:
                     minutes_match = re.search("([0-9]+)m", self.time_to_print)
                     if minutes_match:
                         minutes = int(minutes_match.group(1))
-                    seconds_match = re.search("([0-9]+)m", self.time_to_print)
+                    seconds_match = re.search("([0-9]+)s", self.time_to_print)
                     if seconds_match:
                         seconds = int(seconds_match.group(1))
+                    
+                    self.print_total_hours = float(round( ( (days*24) + (hours) + (minutes/60) + (seconds/(60*60)) ), 2))
+                    print(days, hours, minutes, seconds)
+                    print("print_total_hours: ", self.print_total_hours)
+                    #print("print_total_hours", type(self.print_total_hours))
 
                     if self.short_time_format:
                         hours += days * 24
@@ -100,10 +110,23 @@ class Neptune_Thumbnail:
                         self.time_to_print = "{}d {}h {}m".format(days, hours, minutes)
                     else:
                         self.time_to_print = "{}h {}m".format(hours, minutes)
+                    #print('Time to print:', self.time_to_print)
+
 
                 elif "; total filament used [g] =" in line:
                     used = line.split("=")
-                    self.filament_used = used[1].strip() + "g"
+                    self.filament_used = used[-1].replace('\n', '').strip() + 'g'
+                    #print('Material used:', self.filament_used)
+                
+                elif "; total filament cost =" in line:
+                    self.material_cost = float( re.search(r'\d+\.*\d*', line).group() )
+                    #print("material_cost", self.material_cost)
+                    #print("material_cost", (type(self.material_cost)))
+                elif "; time_cost =" in line:
+                    self.machine_cost = float( re.search (r'\d+\.*\d*', line).group() )
+                    #print("machine_cost", self.machine_cost)
+                    #print("machine_cost", type(self.machine_cost))
+                
 
             if not self.thumbnail:
                 raise Exception(f"End of file reached. Could not find thumbnail {self.img_size} encoding in provided gcode file: {self.slicer_output}")
@@ -111,6 +134,16 @@ class Neptune_Thumbnail:
                 raise Exception(f"End of file reached. Could not find estimated printing time in provided gcode file: {self.slicer_output}")
             if not self.filament_used:
                 raise Exception(f"End of file reached. Could not find estimated total filament used in provided gcode file: {self.slicer_output}")
+
+            if args.cost == "full":
+                self.print_cost = round( ((self.print_total_hours * self.machine_cost) + self.material_cost), 2)
+            if args.cost == "material":
+                self.print_cost = self.material_cost
+            if args.cost == "machine":
+                self.print_cost = round( (self.print_total_hours * self.machine_cost), 2)
+                
+            
+
 
     def decode(self, text) -> QImage:
         """
@@ -139,8 +172,13 @@ class Neptune_Thumbnail:
         y_point_1 = size - int(size * 0.05)
         # time
         painter.drawText(x_point, y_point, self.time_to_print)
+        print("Writing timetoprint:", self.time_to_print, "at", x_point, y_point)
         # filament
-        painter.drawText(x_point, y_point_1, self.filament_used)
+        # processe
+        proc = str(self.filament_used) + " / " + str(self.print_cost)+"€"
+        painter.drawText(x_point, y_point_1, proc)
+        print("Writing proc:", proc, "at", x_point, y_point_1)
+        #print("Writing cost:", self.print_cost)
         painter.end()
 
         if self.debug:
@@ -317,6 +355,12 @@ if __name__ == "__main__":
             "--debug",
             default=False,
             action="store_true",
+        )
+        
+        parser.add_argument(
+            "--cost",
+            default="full",
+            help="full = material+machine hours; machine = machine cost only; material = material cost only"
         )
 
         args = parser.parse_args()
